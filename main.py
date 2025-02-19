@@ -14,11 +14,12 @@ import src
 
 DOMAIN = "fr"
 USE_API = False
+JOB_PREFIX = "availability3"
 UPDATE_EVERY = 500
 NUM_ITEMS = 10000
 TOP_BRANDS_ALPHA = 0.3
 SORT_BY_LIKES_ALPHA = 0.3
-JOB_PREFIX = "availability3"
+SORT_BY_DATE_ALPHA = 0.3
 
 
 def init_clients(
@@ -39,11 +40,14 @@ def init_clients(
 def init_job_config(client: bigquery.Client) -> src.models.JobConfig:
     only_top_brands = random.random() < TOP_BRANDS_ALPHA
     sort_by_likes = random.random() < SORT_BY_LIKES_ALPHA
-
+    sort_by_date = random.random() < SORT_BY_DATE_ALPHA
+    
     if only_top_brands:
         job_id = f"{JOB_PREFIX}_top_brands"
     elif sort_by_likes:
         job_id = f"{JOB_PREFIX}_likes"
+    elif sort_by_date:
+        job_id = f"{JOB_PREFIX}_date"
     else:
         job_id = f"{JOB_PREFIX}_all"
 
@@ -54,17 +58,18 @@ def init_job_config(client: bigquery.Client) -> src.models.JobConfig:
         index=index,
         only_top_brands=only_top_brands,
         sort_by_likes=sort_by_likes,
+        sort_by_date=sort_by_date,
     )
 
 
-def get_data_loader(
-    client: bigquery.Client, index: int, only_top_brands: bool
-) -> bigquery.table.RowIterator:
+def get_data_loader(client: bigquery.Client, config: src.models.JobConfig) -> bigquery.table.RowIterator:
     query = src.bigquery.query_active_items(
         n=NUM_ITEMS, 
         job_prefix=JOB_PREFIX, 
-        index=index, 
-        only_top_brands=only_top_brands
+        index=config.index, 
+        only_top_brands=config.only_top_brands, 
+        sort_by_date=config.sort_by_date, 
+        sort_by_likes=config.sort_by_likes
     )
 
     return src.bigquery.run_query(client, query, to_list=False)
@@ -138,7 +143,8 @@ def main() -> None:
     bq_client, pinecone_index, vinted_client = init_clients(secrets, DOMAIN)
 
     config = init_job_config(bq_client)
-    loader = get_data_loader(bq_client, config.index, config.only_top_brands)
+    print(config)
+    loader = get_data_loader(bq_client, config)
 
     if loader.total_rows == 0:
         config.index = 0
@@ -196,8 +202,8 @@ def main() -> None:
 
     print(f"Deleted {len(pinecone_point_ids)} points.")
 
-    if src.bigquery.update_job_index(bq_client, config.id, config.index + 1):
-        print(f"Updated job index for {config.id} to {config.index+1}.")
+    if src.bigquery.update_job_index(bq_client, config.id, config.index):
+        print(f"Updated job index for {config.id} to {config.index}.")
     else:
         print(f"Failed to update job index for {config.id}.")
 
